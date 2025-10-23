@@ -1,6 +1,6 @@
 # Hex-AI
 
-A research project exploring neural network agents for playing the game **Hex**, with emphasis on model interpretability and interactive visualization.
+A research project exploring neural network agents for playing the game **Hex**, with interactive visualization and (hopefully) model interpretability.
 
 ---
 
