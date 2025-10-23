@@ -45,11 +45,12 @@ class SumTree:
         return float(self.tree[0])
 
     def add(self, p: float, data):
-        tree_idx = self.write + self.capacity - 1
-        self.data[self.write] = data
-        self.update(tree_idx, p)
-        self.write = (self.write + 1) % self.capacity
-        self.n_entries = min(self.n_entries + 1, self.capacity)
+        if data.state is not None:
+            tree_idx = self.write + self.capacity - 1
+            self.data[self.write] = data
+            self.update(tree_idx, p)
+            self.write = (self.write + 1) % self.capacity
+            self.n_entries = min(self.n_entries + 1, self.capacity)
 
     def update(self, tree_idx: int, p: float):
         change = p - self.tree[tree_idx]
@@ -103,9 +104,10 @@ class PrioritizedReplayBuffer:
             b = segment * (i + 1)
             s = random.uniform(a, b)
             idx, p, data = self.tree.get(s)
-            idxs.append(idx)
-            priorities.append(p)
-            batch.append(data)
+            if data is not None: # TODO: find what is causing the None and correct
+                idxs.append(idx)
+                priorities.append(p)
+                batch.append(data)
 
         # convert to tensors
         states = torch.stack([torch.as_tensor(b.state, dtype=torch.float32) for b in batch]).to(self.device)

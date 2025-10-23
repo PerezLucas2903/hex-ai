@@ -182,13 +182,25 @@ class DQNAgentPER:
             ep_return = 0.0
             done = False
             steps = 0
+            previous_turn = None
             while not done:
                 action = self.select_action(state, eval_mode=False)
                 next_state, reward, terminated, truncated, info = self.env.step(action)
                 done_flag = bool(terminated or truncated)
 
                 # store
-                self.push_transition(state, action, reward, next_state, done_flag)
+                if previous_turn is None:
+                    previous_turn = [state, action, reward, next_state, done_flag]
+                else:
+                    p_state, p_action, p_reward, p_next_state, p_done_flag = previous_turn
+
+                    if done_flag:
+                        p_done_flag = True
+                        self.push_transition(state, action, reward, next_state, done_flag)
+
+                    self.push_transition(p_state, p_action, p_reward, p_next_state, p_done_flag)
+                    
+                    previous_turn = [state, action, reward, next_state, done_flag]
 
                 # bookkeeping
                 state = next_state
@@ -217,4 +229,81 @@ class DQNAgentPER:
                 avg = sum(episode_returns[-log_every:]) / len(episode_returns[-log_every:])
                 print(f"[EP {ep}/{num_episodes}] steps {self.total_steps} | episode_return {ep_return:.2f} | avg_last{log_every} {avg:.2f} | eps {self.epsilon():.3f} | replay_len {len(self.replay)}")
 
+        return episode_returns
+    
+    def play(
+        self,
+        num_episodes: int = 10,
+        max_steps_per_episode: Optional[int] = None,
+        render: bool = True,
+        deterministic: bool = True,
+        top_n_actions: int = 3,
+        temperature: float = 0.1,
+    ):
+        """
+        Run the agent in evaluation (play) mode using the trained Q-network.
+
+        Args:
+            num_episodes (int): Number of episodes to play.
+            max_steps_per_episode (int, optional): Limit per episode.
+            render (bool): Whether to render the environment.
+            deterministic (bool): If True, choose among top-N actions 
+                                  with small stochasticity for diversity.
+            top_n_actions (int): Number of top actions considered when deterministic=True.
+            temperature (float): Softmax temperature for sampling among top actions.
+                                 Lower = more greedy, higher = more random.
+        """
+        self.q_net.eval()
+        episode_returns = []
+
+        for ep in range(1, num_episodes + 1):
+            state, _info = self.env.reset()
+            ep_return = 0.0
+            steps = 0
+            done = False
+
+            while not done:
+                with torch.no_grad():
+                    s = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+                    q_values = self.q_net(s).squeeze(0)
+                    q_values_np = q_values.cpu().numpy()
+
+                    if deterministic:
+                        # Select top-N actions
+                        top_n = min(top_n_actions, len(q_values_np))
+                        top_indices = np.argsort(q_values_np)[-top_n:][::-1]
+                        top_qs = q_values_np[top_indices]
+
+                        # Sample among top-N using softmax weighting for variety
+                        if temperature > 0:
+                            probs = np.exp(top_qs / temperature)
+                            probs /= np.sum(probs)
+                            action = np.random.choice(top_indices, p=probs)
+                        else:
+                            # fully greedy among top-N (pick best)
+                            action = top_indices[0]
+                    else:
+                        # epsilon-greedy mode
+                        if random.random() < self.epsilon():
+                            action = self.env.action_space.sample()
+                        else:
+                            action = int(np.argmax(q_values_np))
+
+                next_state, reward, terminated, truncated, _info = self.env.step(int(action))
+                done_flag = terminated or truncated
+
+                ep_return += reward
+                steps += 1
+                state = next_state
+
+                if render:
+                    self.env.render()
+
+                if done_flag or (max_steps_per_episode is not None and steps >= max_steps_per_episode):
+                    done = True
+
+            episode_returns.append(ep_return)
+            print(f"[PLAY EP {ep}/{num_episodes}] return={ep_return:.2f}")
+
+        self.q_net.train()
         return episode_returns

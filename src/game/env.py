@@ -3,6 +3,8 @@ from gym import spaces
 import numpy as np
 from collections import deque
 import matplotlib.pyplot as plt
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 class HEX(gym.Env):
     """
@@ -14,7 +16,7 @@ class HEX(gym.Env):
 
     metadata = {"render_modes": ["matrix", "plot"], "render_fps": 30}
 
-    def __init__(self, grid_size=3, render_mode=None):
+    def __init__(self, grid_size=3, render_mode=None,representation_mode='Matrix_Invertion'):
         super().__init__()
 
         self.grid_size = grid_size
@@ -28,6 +30,7 @@ class HEX(gym.Env):
         self.turn = 0
         self.max_steps = grid_size * grid_size
         self.render_mode = render_mode
+        self.representation_mode = representation_mode
 
         # Matplotlib figure (for persistent visualization)
         self.fig = None
@@ -83,15 +86,49 @@ class HEX(gym.Env):
                         visited.add((nr, nc))
                         queue.append((nr, nc))
         return 0
+    
+
+    def get_representation_state(self):
+        state = self.state.copy()
+        if self.representation_mode == 'Matrix_Invertion':
+            if self.turn == 0:
+                return state
+            elif self.turn == 1:
+                # Invert 1 and 2
+                non_zeros = state != 0
+                state = -1 * state + 3
+                state = state * non_zeros
+                
+                return state.T
+            else:
+                raise KeyError("Fez alguma merda no codigo")
+        else:
+            return state
+        
+    def convert_action_by_representation(self,action):
+        if self.representation_mode == 'Matrix_Invertion':
+            if self.turn == 0:
+                row = action // self.grid_size
+                col = action % self.grid_size
+            elif self.turn == 1:
+                col = action // self.grid_size
+                row = action % self.grid_size
+            else:
+                raise KeyError("Fez alguma merda no codigo")
+        else:
+            row = action // self.grid_size
+            col = action % self.grid_size
+
+        return row,col
+
 
     def step(self, action):
         assert self.action_space.contains(action), f"Invalid action: {action}"
 
-        row = action // self.grid_size
-        col = action % self.grid_size
+        row,col = self.convert_action_by_representation(action)
 
         if self.state[row, col] != 0:
-            return self.state.copy(), -1.0, False, False, {"invalid_move": True}
+            return self.get_representation_state(), -1.0, False, False, {"invalid_move": True}
 
         self.state[row, col] = self.turn + 1
         self.steps += 1
@@ -103,7 +140,7 @@ class HEX(gym.Env):
 
         info = {"winner": winner if terminated else 0}
         self.turn = (self.turn + 1) % 2
-        return self.state.copy(), reward, terminated, truncated, info
+        return self.get_representation_state(), reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode == "matrix":

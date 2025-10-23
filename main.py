@@ -4,7 +4,7 @@ from src.game.agent import DQNAgentPER
 import numpy as np
 
 if __name__ == "__main__":
-    env = HEX(grid_size=11, render_mode="matrix")
+    env = HEX(grid_size=5, render_mode="plot")
 
     obs_space = env.observation_space
     n_actions = env.action_space.n
@@ -22,10 +22,10 @@ if __name__ == "__main__":
         env=env,
         q_net=q_net,
         target_net=target_net,
-        buffer_size=16384,
+        buffer_size=10000,
         batch_size=64,
-        gamma=0.99,
-        lr=1e-3,
+        gamma=1,
+        lr=1e-4,
         sync_every=1000,
         epsilon_start=1.0,
         epsilon_final=0.02,
@@ -39,6 +39,9 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    # quick smoke train (short)
-    returns = agent.train(num_episodes=50, max_steps_per_episode=500, log_every=10, render=False)
+    returns = agent.train(num_episodes=1000, max_steps_per_episode=500, log_every=10, render=False)
+    print("Done. Last returns:", returns[-5:])
+
+    
+    agent.play(num_episodes=10, max_steps_per_episode=500)
     print("Done. Last returns:", returns[-5:])

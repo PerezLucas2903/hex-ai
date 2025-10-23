@@ -42,7 +42,8 @@ class MLP_QNet(BaseQNet):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        # x shape: (batch, input_dim)
+        size = x.size()
+        x = x.reshape(size[0],-1)
         return self.net(x)
 
 
