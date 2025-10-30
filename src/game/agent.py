@@ -88,13 +88,25 @@ class DQNAgentPER:
         return min(1.0, self.per_beta_start + (1.0 - self.per_beta_start) * (frame_idx / max(1, self.per_beta_frames)))
 
     def select_action(self, state: np.ndarray, eval_mode: bool = False) -> int:
-        if (not eval_mode) and random.random() < self.epsilon():
-            return self.env.action_space.sample()
         self.q_net.eval()
         with torch.no_grad():
             s = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
             q_values = self.q_net(s)
-            action = int(torch.argmax(q_values, dim=1).item())
+
+            # Mask invalid actions
+            valid_actions = self.env.get_valid_actions()
+            mask = torch.full(q_values.shape, float('-inf')).to(self.device)
+            mask[0, valid_actions] = 0.0
+            q_values = q_values + mask
+
+            # Get top 3 valid actions
+            top_k = min(3, len(valid_actions))
+            _, top_indices = torch.topk(q_values, top_k, dim=1)
+            top_actions = top_indices[0].tolist()
+
+            # Randomly choose one among the top 3
+            action = random.choice(top_actions)
+            
         self.q_net.train()
         return action
 
@@ -196,9 +208,10 @@ class DQNAgentPER:
 
                     if done_flag:
                         p_done_flag = True
+                        p_reward = -1.0
                         self.push_transition(state, action, reward, next_state, done_flag)
 
-                    self.push_transition(p_state, p_action, p_reward, p_next_state, p_done_flag)
+                    self.push_transition(p_state, p_action, p_reward, next_state, p_done_flag)
                     
                     previous_turn = [state, action, reward, next_state, done_flag]
 
@@ -227,7 +240,7 @@ class DQNAgentPER:
             episode_returns.append(ep_return)
             if ep % log_every == 0 or ep == 1:
                 avg = sum(episode_returns[-log_every:]) / len(episode_returns[-log_every:])
-                print(f"[EP {ep}/{num_episodes}] steps {self.total_steps} | episode_return {ep_return:.2f} | avg_last{log_every} {avg:.2f} | eps {self.epsilon():.3f} | replay_len {len(self.replay)}")
+                print(f"[EP {ep}/{num_episodes}] steps {self.total_steps} | episode_return {ep_return:.2f} | avg_last{log_every} {avg:.2f} | eps {self.epsilon():.3f} | replay_len {len(self.replay)} | train_loss {loss if loss is not None else 0:.4f}")
 
         return episode_returns
     
@@ -239,6 +252,7 @@ class DQNAgentPER:
         deterministic: bool = True,
         top_n_actions: int = 3,
         temperature: float = 0.1,
+        human_player: bool = False,
     ):
         """
         Run the agent in evaluation (play) mode using the trained Q-network.
@@ -267,6 +281,11 @@ class DQNAgentPER:
                     s = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
                     q_values = self.q_net(s).squeeze(0)
                     q_values_np = q_values.cpu().numpy()
+                    valid_actions = self.env.get_valid_actions()
+                    # Mask invalid actions
+                    mask = np.full(q_values_np.shape, -np.inf)
+                    mask[valid_actions] = 0.0
+                    q_values_np = q_values_np + mask
 
                     if deterministic:
                         # Select top-N actions
@@ -289,6 +308,11 @@ class DQNAgentPER:
                         else:
                             action = int(np.argmax(q_values_np))
 
+
+                if self.env.turn == 0 and human_player:
+                    self.env.render()
+                    print(f"Available actions: {self.env.get_valid_actions()}")
+                    action = int(input("Your turn! Enter your action: "))
                 next_state, reward, terminated, truncated, _info = self.env.step(int(action))
                 done_flag = terminated or truncated
 
