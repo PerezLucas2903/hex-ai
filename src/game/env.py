@@ -16,7 +16,7 @@ class HEX(gym.Env):
 
     metadata = {"render_modes": ["matrix", "plot"], "render_fps": 30}
 
-    def __init__(self, grid_size=3, render_mode=None,representation_mode='Matrix_Invertion'):
+    def __init__(self, grid_size=3, render_mode=None,representation_mode='Matrix_Invertion',random_start=True):
         super().__init__()
 
         self.grid_size = grid_size
@@ -31,6 +31,8 @@ class HEX(gym.Env):
         self.max_steps = grid_size * grid_size
         self.render_mode = render_mode
         self.representation_mode = representation_mode
+        self.penalty = 0
+        self.random_start = random_start
 
         # Matplotlib figure (for persistent visualization)
         self.fig = None
@@ -42,6 +44,10 @@ class HEX(gym.Env):
         self.steps = 0
         self.turn = 0
         info = {}
+        
+        if self.random_start:
+            next_state, reward, terminated, truncated, info = self.step(self.action_space.sample())
+            return next_state, info
         return self.state.copy(), info
 
     def check_path(self):
@@ -128,7 +134,7 @@ class HEX(gym.Env):
         row,col = self.convert_action_by_representation(action)
 
         if self.state[row, col] != 0:
-            return self.get_representation_state(), -1.0, False, False, {"invalid_move": True}
+            return self.get_representation_state(), self.penalty, False, False, {"invalid_move": True}
 
         self.state[row, col] = self.turn + 1
         self.steps += 1
@@ -140,7 +146,8 @@ class HEX(gym.Env):
 
         info = {"winner": winner if terminated else 0}
         self.turn = (self.turn + 1) % 2
-        return self.get_representation_state(), reward, terminated, truncated, info
+        next_state = self.get_representation_state()
+        return next_state, reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode == "matrix":
@@ -194,6 +201,12 @@ class HEX(gym.Env):
         if self.fig is not None:
             plt.close(self.fig)
             self.fig = None
+
+    def get_valid_actions(self):
+        if self.turn == 0:
+            return [i for i in range(self.grid_size * self.grid_size) if self.state[i // self.grid_size, i % self.grid_size] == 0]
+        else:
+            return [i for i in range(self.grid_size * self.grid_size) if self.state.T[i // self.grid_size, i % self.grid_size] == 0]
 
 
 if __name__ == '__main__':
