@@ -1,13 +1,14 @@
 from src.game.env import HEX
 from src.models.model import MLP_QNet,Conv_QNet
 from src.models.resnet import ResNet_QNet
+from src.models.attention import Attention_QNet
 from src.game.agent import DQNAgentPER
 import numpy as np
 import torch
 from src.game.adversary import RandomAdversary
 
 if __name__ == "__main__":
-    grid_size = 5
+    grid_size = 11
     adversary = RandomAdversary()
     env = HEX(grid_size=grid_size, render_mode="plot", adversary=adversary)
 
@@ -18,12 +19,12 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    q_net = ResNet_QNet(input_shape = (2,grid_size, grid_size), n_actions=n_actions).to(device)
-    target_net = ResNet_QNet(input_shape = (2,grid_size, grid_size), n_actions=n_actions).to(device)
+    q_net = Attention_QNet(n_attention_layers=4, n_dim=16).to(device)
+    target_net = Attention_QNet(n_attention_layers=4, n_dim=16).to(device)
 
     print(q_net)
 
-    path = "models/resnet_qnet_hex.pth"
+    path = "models/attention_hex.pth"
 
     agent = DQNAgentPER(
         env=env,
@@ -43,7 +44,6 @@ if __name__ == "__main__":
         per_alpha=0.6,
         per_beta_start=0.4,
         per_beta_frames=50000,
-        seed=42,
         device=device
     )
 
