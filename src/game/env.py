@@ -4,6 +4,7 @@ import numpy as np
 from collections import deque
 import matplotlib.pyplot as plt
 import os
+from src.game.adversary import Adversary
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 class HEX(gym.Env):
@@ -16,7 +17,11 @@ class HEX(gym.Env):
 
     metadata = {"render_modes": ["matrix", "plot"], "render_fps": 30}
 
-    def __init__(self, grid_size=3, render_mode=None,representation_mode='Matrix_Invertion',random_start=True):
+    def __init__(self, grid_size : int,
+                 adversary : Adversary,
+                 render_mode : str = None ,
+                 representation_mode : str ='Matrix_Invertion',
+                 random_start : bool =False ):
         super().__init__()
 
         self.grid_size = grid_size
@@ -24,15 +29,13 @@ class HEX(gym.Env):
         self.observation_space = spaces.Box(low=0, high=2,
                                             shape=(grid_size, grid_size),
                                             dtype=np.int8)
-
+        self.adversary = adversary
         self.state = None
         self.steps = 0
         self.turn = 0
         self.max_steps = grid_size * grid_size
         self.render_mode = render_mode
         self.representation_mode = representation_mode
-        self.penalty = 0
-        self.random_start = random_start
 
         # Matplotlib figure (for persistent visualization)
         self.fig = None
@@ -45,19 +48,16 @@ class HEX(gym.Env):
         self.turn = 0
         info = {}
         
-        if self.random_start:
-            next_state, reward, terminated, truncated, info = self.step(self.action_space.sample())
-            return next_state, info
         return self.state.copy(), info
 
     def check_path(self):
         """Check if the current player has connected their respective sides."""
-        player = self.turn + 1
+        player = self.turn
         n = self.grid_size
         visited = set()
         queue = deque()
 
-        if player == 1:
+        if player == 0:
             # Player 1 connects top -> bottom
             for c in range(n):
                 if self.state[0, c] == 1:
@@ -68,7 +68,7 @@ class HEX(gym.Env):
             while queue:
                 r, c = queue.popleft()
                 if r == target_row:
-                    return 1
+                    return 0
                 for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, 1), (1, -1)]:
                     nr, nc = r + dr, c + dc
                     if 0 <= nr < n and 0 <= nc < n and self.state[nr, nc] == 1 and (nr, nc) not in visited:
@@ -85,13 +85,13 @@ class HEX(gym.Env):
             while queue:
                 r, c = queue.popleft()
                 if c == target_col:
-                    return 2
+                    return 1
                 for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, 1), (1, -1)]:
                     nr, nc = r + dr, c + dc
                     if 0 <= nr < n and 0 <= nc < n and self.state[nr, nc] == 2 and (nr, nc) not in visited:
                         visited.add((nr, nc))
                         queue.append((nr, nc))
-        return 0
+        return -1
     
 
     def get_representation_state(self):
@@ -131,21 +131,46 @@ class HEX(gym.Env):
     def step(self, action):
         assert self.action_space.contains(action), f"Invalid action: {action}"
 
-        row,col = self.convert_action_by_representation(action)
-
-        if self.state[row, col] != 0:
-            return self.get_representation_state(), self.penalty, False, False, {"invalid_move": True}
-
+        # Player's move
+        row, col = self.convert_action_by_representation(action)
         self.state[row, col] = self.turn + 1
         self.steps += 1
+        player_won = self.check_path() == 0
 
-        winner = self.check_path()
-        reward = 1.0 if winner == self.turn + 1 else 0.0
-        terminated = winner != 0
-        truncated = self.steps >= self.max_steps
-
-        info = {"winner": winner if terminated else 0}
+        if player_won:
+            reward = 1.0
+            terminated = True
+            truncated = False
+            info = {"winner": self.turn}
+            next_state = self.get_representation_state()
+            return next_state, reward, terminated, truncated, info
+        
         self.turn = (self.turn + 1) % 2
+
+        # Adversary's move
+        valid_actions = self.get_valid_actions()
+        adversary_action = self.adversary.select_action(self.get_representation_state(), valid_actions)
+        row, col = self.convert_action_by_representation(adversary_action)
+        self.state[row, col] = self.turn + 1
+        self.steps += 1
+        adversary_won = self.check_path() == 1
+
+        if adversary_won:
+            reward = -1.0
+            terminated = True
+            truncated = False
+            info = {"winner": self.turn}
+            self.turn = (self.turn + 1) % 2 # To transpose the board
+            next_state = self.get_representation_state()
+            return next_state, reward, terminated, truncated, info
+        
+        self.turn = (self.turn + 1) % 2
+
+        # Continue game
+        reward = 0.0
+        terminated = False
+        truncated = self.steps >= self.max_steps
+        info = {"winner": None}
         next_state = self.get_representation_state()
         return next_state, reward, terminated, truncated, info
 

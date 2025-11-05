@@ -90,23 +90,20 @@ class DQNAgentPER:
     def select_action(self, state: np.ndarray, eval_mode: bool = False) -> int:
         self.q_net.eval()
         with torch.no_grad():
-            s = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-            q_values = self.q_net(s)
+            if eval_mode or random.random() > self.epsilon():
+                s = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+                q_values = self.q_net(s)
+                q_values_np = q_values.cpu().numpy().squeeze(0)
+                valid_actions = self.env.get_valid_actions()
+                # Mask invalid actions
+                mask = np.full(q_values_np.shape, -np.inf)
+                mask[valid_actions] = 0.0
+                q_values_np = q_values_np + mask
+                action = int(np.argmax(q_values_np))
+            else:
+                valid_actions = self.env.get_valid_actions()
+                action = random.choice(valid_actions)
 
-            # Mask invalid actions
-            valid_actions = self.env.get_valid_actions()
-            mask = torch.full(q_values.shape, float('-inf')).to(self.device)
-            mask[0, valid_actions] = 0.0
-            q_values = q_values + mask
-
-            # Get top 3 valid actions
-            top_k = min(3, len(valid_actions))
-            _, top_indices = torch.topk(q_values, top_k, dim=1)
-            top_actions = top_indices[0].tolist()
-
-            # Randomly choose one among the top 3
-            action = random.choice(top_actions)
-            
         self.q_net.train()
         return action
 
@@ -188,38 +185,25 @@ class DQNAgentPER:
         log_every: int = 10,
         render: bool = False,
     ):
-        episode_returns = []
+        win_rate = []
         for ep in range(1, num_episodes + 1):
             state, _info = self.env.reset()
-            ep_return = 0.0
             done = False
             steps = 0
             previous_turn = None
+            
+            store_episode = []
             while not done:
                 action = self.select_action(state, eval_mode=False)
                 next_state, reward, terminated, truncated, info = self.env.step(action)
                 done_flag = bool(terminated or truncated)
 
-                # store
-                if previous_turn is None:
-                    previous_turn = [state, action, reward, next_state, done_flag]
-                else:
-                    p_state, p_action, p_reward, p_next_state, p_done_flag = previous_turn
-
-                    if done_flag:
-                        p_done_flag = True
-                        p_reward = -1.0
-                        self.push_transition(state, action, reward, next_state, done_flag)
-
-                    self.push_transition(p_state, p_action, p_reward, next_state, p_done_flag)
-                    
-                    previous_turn = [state, action, reward, next_state, done_flag]
+                store_episode.append((state, action, next_state, reward, done_flag, self.env.turn))
 
                 # bookkeeping
-                state = next_state
-                ep_return += reward
                 steps += 1
                 self.total_steps += 1
+                state = next_state
 
                 # training step
                 if self.total_steps % self.update_every == 0:
@@ -236,87 +220,47 @@ class DQNAgentPER:
 
                 if done_flag or (max_steps_per_episode is not None and steps >= max_steps_per_episode):
                     done = True
+            
+            win_player = info.get("winner", 0) == 0
+            win_rate.append(win_player)
 
-            episode_returns.append(ep_return)
+            # Store transitions for player
+            for state, action, next_state, reward, done_flag, turn in store_episode:
+                if turn != 0:
+                    raise ValueError("Invalid turn for player. Some transitions are not from the current player.")
+
+                self.push_transition(state, action, reward, next_state, done_flag)
+
+
             if ep % log_every == 0 or ep == 1:
-                avg = sum(episode_returns[-log_every:]) / len(episode_returns[-log_every:])
-                print(f"[EP {ep}/{num_episodes}] steps {self.total_steps} | episode_return {ep_return:.2f} | avg_last{log_every} {avg:.2f} | eps {self.epsilon():.3f} | replay_len {len(self.replay)} | train_loss {loss if loss is not None else 0:.4f}")
+                avg = sum(win_rate[-log_every:]) / len(win_rate[-log_every:])
+                print(f"[EP {ep}/{num_episodes}] steps {self.total_steps} | win rate {avg:.2f} | eps {self.epsilon():.3f} | replay_len {len(self.replay)}")
 
-        return episode_returns
+        return win_rate
     
-    def play(
+    def evaluate(
         self,
         num_episodes: int = 10,
         max_steps_per_episode: Optional[int] = None,
-        render: bool = True,
+        render: bool = False,
         deterministic: bool = True,
         top_n_actions: int = 3,
         temperature: float = 0.1,
         human_player: bool = False,
     ):
-        """
-        Run the agent in evaluation (play) mode using the trained Q-network.
-
-        Args:
-            num_episodes (int): Number of episodes to play.
-            max_steps_per_episode (int, optional): Limit per episode.
-            render (bool): Whether to render the environment.
-            deterministic (bool): If True, choose among top-N actions 
-                                  with small stochasticity for diversity.
-            top_n_actions (int): Number of top actions considered when deterministic=True.
-            temperature (float): Softmax temperature for sampling among top actions.
-                                 Lower = more greedy, higher = more random.
-        """
         self.q_net.eval()
         episode_returns = []
 
         for ep in range(1, num_episodes + 1):
             state, _info = self.env.reset()
-            ep_return = 0.0
             steps = 0
             done = False
 
             while not done:
-                with torch.no_grad():
-                    s = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-                    q_values = self.q_net(s).squeeze(0)
-                    q_values_np = q_values.cpu().numpy()
-                    valid_actions = self.env.get_valid_actions()
-                    # Mask invalid actions
-                    mask = np.full(q_values_np.shape, -np.inf)
-                    mask[valid_actions] = 0.0
-                    q_values_np = q_values_np + mask
-
-                    if deterministic:
-                        # Select top-N actions
-                        top_n = min(top_n_actions, len(q_values_np))
-                        top_indices = np.argsort(q_values_np)[-top_n:][::-1]
-                        top_qs = q_values_np[top_indices]
-
-                        # Sample among top-N using softmax weighting for variety
-                        if temperature > 0:
-                            probs = np.exp(top_qs / temperature)
-                            probs /= np.sum(probs)
-                            action = np.random.choice(top_indices, p=probs)
-                        else:
-                            # fully greedy among top-N (pick best)
-                            action = top_indices[0]
-                    else:
-                        # epsilon-greedy mode
-                        if random.random() < self.epsilon():
-                            action = self.env.action_space.sample()
-                        else:
-                            action = int(np.argmax(q_values_np))
-
-
-                if self.env.turn == 0 and human_player:
-                    self.env.render()
-                    print(f"Available actions: {self.env.get_valid_actions()}")
-                    action = int(input("Your turn! Enter your action: "))
-                next_state, reward, terminated, truncated, _info = self.env.step(int(action))
+                action = self.select_action(state, eval_mode=True)
+                next_state, reward, terminated, truncated, _info = self.env.step(action)          
                 done_flag = terminated or truncated
 
-                ep_return += reward
                 steps += 1
                 state = next_state
 
@@ -324,10 +268,13 @@ class DQNAgentPER:
                     self.env.render()
 
                 if done_flag or (max_steps_per_episode is not None and steps >= max_steps_per_episode):
+                    winner = _info.get("winner", 0)
+                    episode_returns.append(winner == 0)
                     done = True
 
-            episode_returns.append(ep_return)
-            print(f"[PLAY EP {ep}/{num_episodes}] return={ep_return:.2f}")
+
+        win_rate = sum(episode_returns) / num_episodes
+        print(f"[EVAL] win_rate over {num_episodes} episodes: {win_rate:.2f}")
 
         self.q_net.train()
         return episode_returns

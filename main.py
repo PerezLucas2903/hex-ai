@@ -4,12 +4,14 @@ from src.models.resnet import ResNet_QNet
 from src.game.agent import DQNAgentPER
 import numpy as np
 import torch
+from src.game.adversary import RandomAdversary
 
 if __name__ == "__main__":
-    grid_size = 11
-    env = HEX(grid_size=grid_size, render_mode="plot")
+    grid_size = 5
+    adversary = RandomAdversary()
+    env = HEX(grid_size=grid_size, render_mode="plot", adversary=adversary)
 
-    obs_space = env.observation_space
+    obs_space = env.observation_space 
     
     n_actions = env.action_space.n
 
@@ -19,6 +21,8 @@ if __name__ == "__main__":
     q_net = ResNet_QNet(input_shape = (2,grid_size, grid_size), n_actions=n_actions).to(device)
     target_net = ResNet_QNet(input_shape = (2,grid_size, grid_size), n_actions=n_actions).to(device)
 
+    print(q_net)
+
     path = "models/resnet_qnet_hex.pth"
 
     agent = DQNAgentPER(
@@ -26,11 +30,11 @@ if __name__ == "__main__":
         q_net=q_net,
         target_net=target_net,
         buffer_size=10000,
-        batch_size=64,
+        batch_size=256,
         gamma=1,
-        lr=1e-4,
+        lr=1e-5,
         sync_every=1000,
-        epsilon_start=0.01,
+        epsilon_start=1,
         epsilon_final=0.01,
         epsilon_decay=15000,
         update_every=grid_size,
@@ -52,13 +56,11 @@ if __name__ == "__main__":
 
     
     for _ in range(1000):
-        returns = agent.train(num_episodes=int(1e3), max_steps_per_episode=grid_size*grid_size, log_every=100, render=False)
+        returns = agent.train(num_episodes=int(2e3), max_steps_per_episode=grid_size*grid_size, log_every=100, render=False)
         print("Done. Last returns:", returns[-5:])
 
         agent.save(path)
         agent.save(path[:-4] + f'_{grid_size}.pth')
         print(f"Saved trained model weights to {path}")
 
-    
-    returns = agent.play(num_episodes=2, max_steps_per_episode=grid_size*grid_size,human_player=True, render=True)
-    print("Done. Last returns:", returns[-5:])
+        agent.evaluate(num_episodes=100, max_steps_per_episode=grid_size*grid_size, render=False, temperature=0.0)

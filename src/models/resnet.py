@@ -23,7 +23,7 @@ class ResNet(nn.Module):
         return self.out(x + self.cnn(x))
     
 class ResNet_QNet(BaseQNet):
-    def __init__(self, input_shape: Tuple[int, int], n_actions: int, channels=(4,8,16,32), kernel_size=3):
+    def __init__(self, input_shape: Tuple[int, int], n_actions: int, channels=(4,8), kernel_size=5):
         super().__init__()
         if len(input_shape) == 3:
             self.in_channels = input_shape[0]
@@ -31,6 +31,10 @@ class ResNet_QNet(BaseQNet):
         else:
             self.in_channels = 1
             h, w = input_shape
+
+        self.n_actions = n_actions
+        self.h = h
+        self.w = w
 
         resnet_layers = []
         in_ch = self.in_channels
@@ -45,12 +49,19 @@ class ResNet_QNet(BaseQNet):
             resnet_out = self.resnet(dummy)
             resnet_flat = int(np.prod(resnet_out.shape[1:]))
 
-        self.head = nn.Sequential(
+        self.advantage_layer = nn.Sequential(
             nn.Flatten(),
             nn.Linear(resnet_flat, 256),
             nn.ReLU(),
-            nn.Linear(256, n_actions),
-            nn.Tanh()
+            nn.Linear(256, n_actions)
+        )
+
+        self.value_layer = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(resnet_flat, 256),
+            nn.ReLU(),
+
+            nn.Linear(256, 1),
         )
 
     def forward(self, x):
@@ -58,5 +69,10 @@ class ResNet_QNet(BaseQNet):
         x = x.permute(0,3,1,2)[:,1:]
 
         resnetf = self.resnet(x)
-        q = self.head(resnetf)
+
+        advantage = self.advantage_layer(resnetf)
+        value = self.value_layer(resnetf)
+
+        q = value + advantage - advantage.mean(dim=-1, keepdim=True)
+        q = nn.Tanh()(q) 
         return q
