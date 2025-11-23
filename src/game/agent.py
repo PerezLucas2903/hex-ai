@@ -243,10 +243,6 @@ class DQNAgentPER:
         num_episodes: int = 10,
         max_steps_per_episode: Optional[int] = None,
         render: bool = False,
-        deterministic: bool = True,
-        top_n_actions: int = 3,
-        temperature: float = 0.1,
-        human_player: bool = False,
     ):
         self.q_net.eval()
         episode_returns = []
@@ -277,4 +273,4 @@ class DQNAgentPER:
         print(f"[EVAL] win_rate over {num_episodes} episodes: {win_rate:.2f}")
 
         self.q_net.train()
-        return episode_returns
+        return win_rate

@@ -5,11 +5,19 @@ from src.models.attention import Attention_QNet
 from src.game.agent import DQNAgentPER
 import numpy as np
 import torch
-from src.game.adversary import RandomAdversary
+from src.game.adversary import RandomAdversary, NNAdversary
 
 if __name__ == "__main__":
-    grid_size = 11
-    adversary = RandomAdversary()
+    grid_size = 5
+    n_attention_layers = 6
+    n_dim = 32
+
+    model_adversary = Attention_QNet(n_attention_layers=n_attention_layers, n_dim=n_dim)
+    try:
+        model_adversary.load_state_dict(torch.load("models/attention_hex_adv.pth")['q_state'])
+    except:
+        print("No pre-trained adversary model found. Using untrained adversary.")
+    adversary = NNAdversary(model_adversary)
     env = HEX(grid_size=grid_size, render_mode="plot", adversary=adversary)
 
     obs_space = env.observation_space 
@@ -19,10 +27,13 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    q_net = Attention_QNet(n_attention_layers=4, n_dim=16).to(device)
-    target_net = Attention_QNet(n_attention_layers=4, n_dim=16).to(device)
+    q_net = Attention_QNet(n_attention_layers=n_attention_layers, n_dim=n_dim).to(device)
+    target_net = Attention_QNet(n_attention_layers=n_attention_layers, n_dim=n_dim).to(device)
 
     print(q_net)
+    # print model parameters count
+    total_params = sum(p.numel() for p in q_net.parameters())
+    print(f"Total model parameters: {total_params}")
 
     path = "models/attention_hex.pth"
 
@@ -36,7 +47,7 @@ if __name__ == "__main__":
         lr=1e-5,
         sync_every=1000,
         epsilon_start=1,
-        epsilon_final=0.01,
+        epsilon_final=0.1,
         epsilon_decay=15000,
         update_every=grid_size,
         tau=1.0,
@@ -56,11 +67,20 @@ if __name__ == "__main__":
 
     
     for _ in range(1000):
+        """
         returns = agent.train(num_episodes=int(2e3), max_steps_per_episode=grid_size*grid_size, log_every=100, render=False)
         print("Done. Last returns:", returns[-5:])
 
         agent.save(path)
         agent.save(path[:-4] + f'_{grid_size}.pth')
-        print(f"Saved trained model weights to {path}")
+        print(f"Saved trained model weights to {path}")"""
 
-        agent.evaluate(num_episodes=100, max_steps_per_episode=grid_size*grid_size, render=False, temperature=0.0)
+        win_rate = agent.evaluate(num_episodes=100, max_steps_per_episode=grid_size*grid_size, 
+                                  render=True)
+
+        if win_rate >= 0.6:
+            agent.env.adversary.update_weights(torch.load(path)['q_state'])
+            print("Adversary updated.")
+            torch.save({'q_state': agent.env.adversary.model.state_dict()}, "models/attention_hex_adv.pth")
+            agent.replay.clear()
+

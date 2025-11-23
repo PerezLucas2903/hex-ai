@@ -47,8 +47,18 @@ class HEX(gym.Env):
         self.steps = 0
         self.turn = 0
         info = {}
+
+        if np.random.rand() < 0.5:
+            # Adversary starts
+            self.turn = 1
+            valid_actions = self.get_valid_actions()
+            adversary_action = self.adversary.select_action(self.get_representation_state(), valid_actions)
+            row, col = self.convert_action_by_representation(adversary_action)
+            self.state[row, col] = 2  # Adversary is player 2
+            self.steps += 1
+            self.turn = 0  # Player 1's turn
         
-        return self.state.copy(), info
+        return self.get_representation_state(), info
 
     def check_path(self):
         """Check if the current player has connected their respective sides."""
