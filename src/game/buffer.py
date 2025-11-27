@@ -3,7 +3,7 @@ import random
 from collections import namedtuple
 from typing import Optional, Tuple
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn

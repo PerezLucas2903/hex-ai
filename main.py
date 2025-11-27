@@ -67,16 +67,15 @@ if __name__ == "__main__":
 
     
     for _ in range(1000):
-        """
         returns = agent.train(num_episodes=int(2e3), max_steps_per_episode=grid_size*grid_size, log_every=100, render=False)
         print("Done. Last returns:", returns[-5:])
 
         agent.save(path)
         agent.save(path[:-4] + f'_{grid_size}.pth')
-        print(f"Saved trained model weights to {path}")"""
+        print(f"Saved trained model weights to {path}")
 
         win_rate = agent.evaluate(num_episodes=100, max_steps_per_episode=grid_size*grid_size, 
-                                  render=True)
+                                  render=False)
 
         if win_rate >= 0.6:
             agent.env.adversary.update_weights(torch.load(path)['q_state'])
