@@ -23,3 +23,14 @@ A research project exploring neural network agents for playing the game **Hex**,
 git clone https://github.com/PerezLucas2903/hex-ai.git
 cd hex-ai
 pip install -r requirements.txt
+
+### 2. Play Hex against models
+Play against random moves:
+```
+python play_human_vs_model.py --adversary-type random
+```
+
+Play against a trained model
+```
+python play_human_vs_model.py --adversary-type nn --model-path path/to/model.pth
+```
